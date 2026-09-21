@@ -80,7 +80,7 @@ fn ie_config() -> Option<IeConfig> {
 }
 
 fn proxy_for_url(url: &str, pac: Option<&str>, auto_detect: bool) -> Result<Vec<Hop>> {
-    let agent = wide("cntlm-next/0.1");
+    let agent = wide("ntgate/0.1");
     let session = unsafe {
         WinHttpOpen(
             agent.as_ptr(),

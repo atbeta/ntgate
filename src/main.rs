@@ -3,17 +3,17 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use cntlm_next::config::{self, Config};
-use cntlm_next::error::Result;
+use ntgate::config::{self, Config};
+use ntgate::error::Result;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "cntlm-next",
+    name = "ntgate",
     version,
     about = "Windows NTLM/Negotiate local proxy facade"
 )]
 struct Cli {
-    /// Config file (default: %LOCALAPPDATA%\cntlm-next\cntlm-next\config.toml)
+    /// Config file (default: %LOCALAPPDATA%\ntgate\ntgate\config.toml)
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
@@ -45,11 +45,11 @@ fn main() -> anyhow::Result<()> {
     match cli.command.unwrap_or(Command::Run) {
         Command::Run => {
             let cfg = load_or_create(&config_path)?;
-            tokio::runtime::Runtime::new()?.block_on(cntlm_next::server::run(cfg))?;
+            tokio::runtime::Runtime::new()?.block_on(ntgate::server::run(cfg))?;
         }
         Command::Doctor => {
             let cfg = load_or_create(&config_path)?;
-            tokio::runtime::Runtime::new()?.block_on(cntlm_next::doctor::run(&cfg))?;
+            tokio::runtime::Runtime::new()?.block_on(ntgate::doctor::run(&cfg))?;
         }
         Command::PrintEnv => {
             let cfg = load_or_create(&config_path)?;
@@ -62,12 +62,12 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Install => {
             let _ = load_or_create(&config_path)?;
-            cntlm_next::service::install(&config_path)?;
+            ntgate::service::install(&config_path)?;
         }
-        Command::Uninstall => cntlm_next::service::uninstall()?,
+        Command::Uninstall => ntgate::service::uninstall()?,
         Command::Status => {
             let cfg = load_or_create(&config_path)?;
-            cntlm_next::service::status(&cfg)?;
+            ntgate::service::status(&cfg)?;
         }
     }
     Ok(())

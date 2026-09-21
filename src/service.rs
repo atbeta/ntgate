@@ -6,7 +6,7 @@ use crate::error::Error;
 use crate::error::Result;
 
 #[cfg(windows)]
-const TASK_NAME: &str = "cntlm-next";
+const TASK_NAME: &str = "ntgate";
 
 pub fn install(config_path: &Path) -> Result<()> {
     #[cfg(windows)]
@@ -44,6 +44,9 @@ pub fn status(cfg: &Config) -> Result<()> {
     );
     println!("listen      {}", cfg.listen);
     println!("mode        {:?}", cfg.mode);
+    if let Some(pac) = cfg.pac.as_deref() {
+        println!("pac         {pac}");
+    }
     #[cfg(windows)]
     {
         windows::print_task_status();
@@ -69,7 +72,7 @@ mod windows {
         let exe_s = exe.to_string_lossy().replace('/', "\\");
         let cfg_s = config_path.to_string_lossy().replace('/', "\\");
         let xml = task_xml(&exe_s, &cfg_s);
-        let tmp = std::env::temp_dir().join("cntlm-next-task.xml");
+        let tmp = std::env::temp_dir().join("ntgate-task.xml");
         {
             let mut f = std::fs::File::create(&tmp)?;
             f.write_all(xml.as_bytes())?;
@@ -137,7 +140,7 @@ mod windows {
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>cntlm-next local NTLM/Negotiate proxy facade</Description>
+    <Description>ntgate local NTLM/Negotiate proxy facade</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>

@@ -1,19 +1,19 @@
 [package]
-name = "cntlm-next"
+name = "ntgate"
 version = "0.1.0"
 edition = "2024"
-description = "Windows NTLM/Negotiate local proxy facade (cntlm/Winfoom successor)"
+description = "Windows NTLM/Negotiate local proxy facade (Winfoom-compatible, current-user SSO)"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 publish = false
 rust-version = "1.85"
 
 [lib]
-name = "cntlm_next"
+name = "ntgate"
 path = "src/lib.rs"
 
 [[bin]]
-name = "cntlm-next"
+name = "ntgate"
 path = "src/main.rs"
 
 [dependencies]

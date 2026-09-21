@@ -35,7 +35,7 @@ Types: `feat` `fix` `perf` `refactor` `style` `docs` `test` `chore` `ci`
 
 ≥ 4 staged files → body with 2–6 bullets (why, impact, optional risk).
 
-## Project: cntlm-next
+## Project: ntgate
 
 Windows local HTTP proxy facade for corporate NTLM/Negotiate/PAC proxies. Winfoom-compatible behavior; single binary + TOML; current-user SSPI; logon task instead of a SYSTEM service.
 
@@ -62,7 +62,7 @@ cargo clippy --all-targets -- -D warnings
 cargo build --release
 ```
 
-CI (`.github/workflows/ci.yml`): Ubuntu `cargo test` + clippy; Windows x64 `cargo build --release` uploads `cntlm-next.exe`. Tags `v*` publish a GitHub Release.
+CI (`.github/workflows/ci.yml`): Ubuntu `cargo test` + clippy; Windows x64 `cargo build --release` uploads `ntgate.exe`. Tags `v*` publish a GitHub Release.
 
 ### Project-specific rules
 

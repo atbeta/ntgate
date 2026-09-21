@@ -132,25 +132,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
-name = "cntlm-next"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "clap",
- "directories",
- "httparse",
- "serde",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "windows-sys 0.59.0",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -287,6 +268,25 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ntgate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "clap",
+ "directories",
+ "httparse",
+ "serde",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

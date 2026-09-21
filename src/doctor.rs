@@ -10,6 +10,9 @@ use crate::resolve::{self, Resolver};
 pub async fn run(cfg: &Config) -> Result<()> {
     println!("listen      {}", cfg.listen);
     println!("mode        {:?}", cfg.mode);
+    if let Some(pac) = cfg.pac.as_deref() {
+        println!("pac         {pac}");
+    }
     println!("test_url    {}", cfg.test_url);
     println!("auth        {:?}", cfg.auth);
 
@@ -90,7 +93,7 @@ async fn probe(cfg: &Config, hop: &Hop, dest: &(String, u16)) -> Result<String> 
                     version: "HTTP/1.1".into(),
                     headers: vec![
                         ("Host".into(), dest.0.clone()),
-                        ("User-Agent".into(), "cntlm-next/0.1".into()),
+                        ("User-Agent".into(), "ntgate/0.1".into()),
                     ],
                     body: Vec::new(),
                 }

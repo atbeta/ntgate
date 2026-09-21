@@ -1,22 +1,48 @@
-# cntlm-next local proxy
+# ntgate — 本机无认证 HTTP 代理（127.0.0.1:3128）
 #
-# Default path: %LOCALAPPDATA%\cntlm-next\cntlm-next\config.toml
-# Override: cntlm-next -c path.toml
+# 把公司 NTLM / Negotiate / PAC 父代理收成给 git / npm / curl 用的本地代理。
+# 不写密码，鉴权用当前 Windows 登录会话（SSPI）。
+#
+# 位置: %LOCALAPPDATA%\ntgate\ntgate\config.toml
+# 日志: %LOCALAPPDATA%\ntgate\ntgate\ntgate.log
+# 覆盖: ntgate -c D:\path\config.toml
+#
+# 建议顺序:
+#   1. 改好下面的 mode / pac / upstream
+#   2. ntgate doctor     （用当前用户打通上游）
+#   3. ntgate print-env  （把 HTTP_PROXY 配给 git / npm）
+#   4. ntgate install    （登录后自动启动；不要用 SYSTEM 服务）
 
+# 只绑回环。改成 0.0.0.0 等于把你的域账号 SSO 借给局域网其他人。
 listen = "127.0.0.1:3128"
 
-# system = follow current user's WinHTTP / IE settings (PAC, WPAD, or static)
-# pac    = evaluate `pac` URL or file
-# proxy  = always use `upstream`
+# ---------- 选一种模式（三选一，不要混用）----------
+# system  跟随当前用户的 WinHTTP / IE 设置（PAC / WPAD / 静态代理）。
+#         忽略下面的 pac、upstream。公司电脑「自动检测/脚本」用这个。
+# pac     只用下面的 pac 脚本。忽略 upstream。
+# proxy   全部走下面的 upstream。忽略 pac、系统代理。
 mode = "system"
 
+# mode = "proxy" 时必填。mode = "system" / "pac" 时写了也不会用。
 # upstream = "proxy.xxx.com:8080"
-# pac = "http://pac.xxx.com/proxy.pac"
 
+# mode = "pac" 时必填。HTTP URL 或本地文件；相对路径相对本配置文件所在目录。
+# PAC 返回 PROXY a:8080; PROXY b:8080; DIRECT 时按顺序试，SOCKS 会跳过。
+# pac = "http://pac.xxx.com/proxy.pac"
+# pac = "proxy.pac"
+# pac = "C:/Users/you/proxy.pac"
+
+# auto = 上游给 Negotiate 就走 Negotiate，否则 NTLM。一般不用改。
 auth = "auto"
+
+# doctor 探测用的网址（建议改成公司内网一定能通的 https）。
 test_url = "https://example.com"
+
+# PAC 选中的某个父代理连不上/鉴权失败后，跳过它多少分钟。
 blacklist_timeout = 30
 
+# 命中则直连、不进父代理。在 system / pac / proxy 三种模式都生效。
+# 支持主机名、*.suffix、CIDR。
 noproxy = [
   "localhost",
   "127.0.0.1",
