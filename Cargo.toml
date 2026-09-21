@@ -1,0 +1,42 @@
+[package]
+name = "cntlm-next"
+version = "0.1.0"
+edition = "2024"
+description = "Windows NTLM/Negotiate local proxy facade (cntlm/Winfoom successor)"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+publish = false
+rust-version = "1.85"
+
+[lib]
+name = "cntlm_next"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cntlm-next"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+bytes = "1.12.1"
+clap = { version = "4.6.7", features = ["derive"] }
+directories = "6.0.0"
+httparse = "1.10.1"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+toml = "1.1.6"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+    "Win32_Security",
+    "Win32_Security_Authentication_Identity",
+    "Win32_Security_Credentials",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+] }

@@ -1,0 +1,27 @@
+# cntlm-next local proxy
+#
+# Default path: %LOCALAPPDATA%\cntlm-next\cntlm-next\config.toml
+# Override: cntlm-next -c path.toml
+
+listen = "127.0.0.1:3128"
+
+# system = follow current user's WinHTTP / IE settings (PAC, WPAD, or static)
+# pac    = evaluate `pac` URL or file
+# proxy  = always use `upstream`
+mode = "system"
+
+# upstream = "proxy.xxx.com:8080"
+# pac = "http://pac.xxx.com/proxy.pac"
+
+auth = "auto"
+test_url = "https://example.com"
+blacklist_timeout = 30
+
+noproxy = [
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "10.0.0.0/8",
+  "192.168.0.0/16",
+  "172.16.0.0/12",
+]
