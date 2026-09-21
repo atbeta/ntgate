@@ -39,8 +39,9 @@ pub async fn read_client_request(
     let head = read_until_double_crlf(stream, leftover, 64 * 1024).await?;
     let mut req = http1::parse_request_head(&head)?;
     if req.is_connect() {
-        req.body = leftover.clone();
-        leftover.clear();
+        // TLS ClientHello (or any bytes pipelined after CONNECT) stays in
+        // leftover and is spliced after the 200. Never treat it as an HTTP body
+        // or NTLM handshake will send it as request payload.
         return Ok(req);
     }
     if http1::is_chunked(&req.headers) {

@@ -20,7 +20,7 @@ cntlm-next install
 
 `install` 会在 Task Scheduler 里注册**当前用户登录触发**的任务（不是 LOCAL SYSTEM，否则 SSO 会 407），失败 5 秒后重试。
 
-默认配置写在 `%LOCALAPPDATA%\cntlm-next\cntlm-next\config.toml`。
+默认配置写在 `%LOCALAPPDATA%\cntlm-next\cntlm-next\config.toml`，登录任务的日志在同目录 `cntlm-next.log`。
 
 ## 配置
 

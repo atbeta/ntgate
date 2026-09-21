@@ -24,14 +24,14 @@ pub async fn run(cfg: Config) -> Result<()> {
         let cfg = cfg.clone();
         let resolver = resolver.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(&cfg, &resolver, client).await {
+            if let Err(e) = handle_client(&cfg, resolver, client).await {
                 tracing::debug!("{peer}: {e}");
             }
         });
     }
 }
 
-async fn handle_client(cfg: &Config, resolver: &Resolver, mut client: TcpStream) -> Result<()> {
+async fn handle_client(cfg: &Config, resolver: Arc<Resolver>, mut client: TcpStream) -> Result<()> {
     let mut leftover = Vec::new();
     let req = match io::read_client_request(&mut client, &mut leftover, cfg.max_buffered_body).await
     {
@@ -49,11 +49,20 @@ async fn handle_client(cfg: &Config, resolver: &Resolver, mut client: TcpStream)
         }
     };
     let url = resolve::url_for_destination(&host, port, req.is_connect());
-    let hops = match resolver.hops_for(&url, &host) {
-        Ok(h) => h,
-        Err(e) => {
-            io::send_simple(&mut client, 502, &e.to_string()).await?;
-            return Ok(());
+    let hops = {
+        let resolver = resolver.clone();
+        let url = url.clone();
+        let host = host.clone();
+        match tokio::task::spawn_blocking(move || resolver.hops_for(&url, &host)).await {
+            Ok(Ok(h)) => h,
+            Ok(Err(e)) => {
+                io::send_simple(&mut client, 502, &e.to_string()).await?;
+                return Ok(());
+            }
+            Err(e) => {
+                io::send_simple(&mut client, 502, &format!("resolver task: {e}")).await?;
+                return Ok(());
+            }
         }
     };
     tracing::debug!(
@@ -65,7 +74,7 @@ async fn handle_client(cfg: &Config, resolver: &Resolver, mut client: TcpStream)
 
     let mut last_err: Option<Error> = None;
     for hop in &hops {
-        match try_hop(cfg, resolver, hop, &req, &host, port, &mut client).await {
+        match try_hop(cfg, hop, &req, &host, port, &mut client, &mut leftover).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 tracing::debug!("hop {} failed: {e}", hop.display());
@@ -82,21 +91,19 @@ async fn handle_client(cfg: &Config, resolver: &Resolver, mut client: TcpStream)
 
 async fn try_hop(
     cfg: &Config,
-    _resolver: &Resolver,
     hop: &Hop,
     req: &ClientRequest,
     dest_host: &str,
     dest_port: u16,
     client: &mut TcpStream,
+    leftover: &mut Vec<u8>,
 ) -> Result<()> {
     match hop {
         Hop::Direct => {
             let mut dest = connect(dest_host, dest_port).await?;
             if req.is_connect() {
                 io::write_all(client, b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
-                if !req.body.is_empty() {
-                    io::write_all(&mut dest, &req.body).await?;
-                }
+                flush_preface(&mut dest, leftover).await?;
                 io::splice(client, &mut dest).await
             } else {
                 let mut origin = req.clone();
@@ -121,9 +128,7 @@ async fn try_hop(
                     });
                 }
                 io::write_all(client, b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
-                if !req.body.is_empty() {
-                    io::write_all(&mut upstream, &req.body).await?;
-                }
+                flush_preface(&mut upstream, leftover).await?;
                 if !up_left.is_empty() {
                     io::write_all(client, &up_left).await?;
                     up_left.clear();
@@ -135,6 +140,15 @@ async fn try_hop(
             }
         }
     }
+}
+
+async fn flush_preface(dest: &mut TcpStream, leftover: &mut Vec<u8>) -> Result<()> {
+    if leftover.is_empty() {
+        return Ok(());
+    }
+    io::write_all(dest, leftover).await?;
+    leftover.clear();
+    Ok(())
 }
 
 async fn connect(host: &str, port: u16) -> Result<TcpStream> {

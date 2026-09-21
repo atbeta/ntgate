@@ -81,9 +81,48 @@ fn load_or_create(path: &std::path::Path) -> Result<Config> {
 }
 
 fn init_tracing() {
+    use std::io::{IsTerminal, stderr};
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
+    let log_path = config::default_log_path();
+    let _ = config::ensure_parent(&log_path);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .ok();
+
+    let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_target(false)
-        .init();
+        .with_target(false);
+
+    match file {
+        Some(file) if stderr().is_terminal() => {
+            builder
+                .with_writer(std::sync::Mutex::new(Tee { file }))
+                .init();
+        }
+        Some(file) => {
+            builder.with_writer(std::sync::Mutex::new(file)).init();
+        }
+        None => {
+            builder.init();
+        }
+    }
+}
+
+struct Tee {
+    file: std::fs::File,
+}
+
+impl std::io::Write for Tee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::Write::write(&mut std::io::stderr(), buf);
+        std::io::Write::write(&mut self.file, buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+        std::io::Write::flush(&mut self.file)
+    }
 }

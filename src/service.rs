@@ -38,6 +38,10 @@ pub fn status(cfg: &Config) -> Result<()> {
         "config      {}",
         crate::config::default_config_path().display()
     );
+    println!(
+        "log         {}",
+        crate::config::default_log_path().display()
+    );
     println!("listen      {}", cfg.listen);
     println!("mode        {:?}", cfg.mode);
     #[cfg(windows)]
@@ -82,10 +86,14 @@ mod windows {
                 String::from_utf8_lossy(&out.stderr)
             )));
         }
+        let _ = Command::new("schtasks")
+            .args(["/Run", "/TN", TASK_NAME])
+            .output();
         println!("installed logon task `{TASK_NAME}`");
         println!("  exe     {exe_s}");
         println!("  config  {cfg_s}");
-        println!("  starts at user logon, restarts on failure");
+        println!("  log     {}", crate::config::default_log_path().display());
+        println!("  started now; also starts at user logon, restarts on failure");
         Ok(())
     }
 
@@ -126,7 +134,7 @@ mod windows {
         let exe = xml_escape(exe);
         let args = xml_escape(&format!("run -c \"{config}\""));
         format!(
-            r#"<?xml version="1.0" encoding="UTF-16"?>
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>cntlm-next local NTLM/Negotiate proxy facade</Description>

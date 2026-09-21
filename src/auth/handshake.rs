@@ -38,7 +38,7 @@ pub async fn authenticate_and_send(
     io::discard_body(upstream, leftover, &resp.headers).await?;
 
     let challenges = http1::proxy_authenticate(&resp.headers);
-    let (scheme, initial_token) = http1::pick_proxy_auth(&challenges).ok_or_else(|| {
+    let (scheme, mut initial_token) = http1::pick_proxy_auth(&challenges).ok_or_else(|| {
         Error::Auth(format!(
             "407 without NTLM/Negotiate (headers={:?})",
             challenges
@@ -52,18 +52,10 @@ pub async fn authenticate_and_send(
     };
 
     let mut session = backend::create(proxy_host, &scheme)?;
-    // Some proxies put a token on the first 407; feed it if present.
-    if let Some(tok) = initial_token.as_deref()
-        && !tok.is_empty()
-        && session.needs_challenge()
-    {
-        // first 407 with empty token is normal for NTLM type1
-        let _ = tok;
-    }
 
     for round in 0..6 {
         let challenge = if round == 0 {
-            None
+            initial_token.take().filter(|t| !t.is_empty())
         } else {
             http1::pick_proxy_auth(&http1::proxy_authenticate(&resp.headers)).and_then(|(_, t)| t)
         };
@@ -102,9 +94,6 @@ pub async fn authenticate_and_send(
 pub trait AuthSession {
     fn step(&mut self, challenge_b64: Option<&str>) -> Result<String>;
     fn is_complete(&self) -> bool;
-    fn needs_challenge(&self) -> bool {
-        false
-    }
 }
 
 pub mod backend {

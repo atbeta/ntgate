@@ -223,6 +223,9 @@ pub fn encode_request(req: &ClientRequest, extra: &[(&str, &str)], include_body:
         if is_hop_by_hop(k) {
             continue;
         }
+        if !include_body && k.eq_ignore_ascii_case("content-length") {
+            continue;
+        }
         out.extend_from_slice(k.as_bytes());
         out.extend_from_slice(b": ");
         out.extend_from_slice(v.as_bytes());
@@ -332,5 +335,21 @@ mod tests {
         let (scheme, token) = pick_proxy_auth(&ch).unwrap();
         assert_eq!(scheme, "Negotiate");
         assert_eq!(token.as_deref(), Some("aaaa"));
+    }
+
+    #[test]
+    fn handshake_without_body_replaces_content_length() {
+        let req = ClientRequest {
+            method: "POST".into(),
+            target: "http://example.com/upload".into(),
+            version: "HTTP/1.1".into(),
+            headers: vec![("Content-Length".into(), "4".into())],
+            body: b"ping".to_vec(),
+        };
+        let raw = encode_request(&req, &[("Proxy-Authorization", "NTLM aaa")], false);
+        let text = String::from_utf8(raw).unwrap();
+        assert!(text.contains("Content-Length: 0"));
+        assert!(!text.contains("Content-Length: 4"));
+        assert!(!text.contains("ping"));
     }
 }
