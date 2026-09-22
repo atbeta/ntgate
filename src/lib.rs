@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod config;
+mod dial;
 pub mod doctor;
 pub mod error;
 pub mod hop;

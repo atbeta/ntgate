@@ -1,6 +1,6 @@
 [package]
 name = "ntgate"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Windows NTLM/Negotiate local proxy facade (Winfoom-compatible, current-user SSO)"
 license = "MIT OR Apache-2.0"
@@ -24,6 +24,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 directories = "6.0.0"
 httparse = "1.10.1"
 serde = { version = "1.0.229", features = ["derive"] }
+socket2 = "0.6"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["full"] }
 toml = "1.1.6"

@@ -1,5 +1,3 @@
-use tokio::net::TcpStream;
-
 use crate::auth;
 use crate::config::Config;
 use crate::error::{Error, Result};
@@ -72,11 +70,11 @@ fn dest_from_test_url(url: &str) -> Result<(String, u16)> {
 async fn probe(cfg: &Config, hop: &Hop, dest: &(String, u16)) -> Result<String> {
     match hop {
         Hop::Direct => {
-            let _ = connect(&dest.0, dest.1).await?;
+            let _ = crate::dial::connect(&dest.0, dest.1).await?;
             Ok(format!("direct TCP {}:{}", dest.0, dest.1))
         }
         Hop::Http { host, port } => {
-            let mut up = connect(host, *port).await?;
+            let mut up = crate::dial::connect(host, *port).await?;
             let mut leftover = Vec::new();
             let req = if dest.1 == 443 {
                 ClientRequest {
@@ -119,14 +117,4 @@ async fn probe(cfg: &Config, hop: &Hop, dest: &(String, u16)) -> Result<String> 
             }
         }
     }
-}
-
-async fn connect(host: &str, port: u16) -> Result<TcpStream> {
-    TcpStream::connect((host, port))
-        .await
-        .map_err(|e| Error::Upstream {
-            host: host.into(),
-            port,
-            message: e.to_string(),
-        })
 }
