@@ -152,21 +152,40 @@ async fn flush_preface(dest: &mut TcpStream, leftover: &mut Vec<u8>) -> Result<(
 }
 
 async fn connect(host: &str, port: u16) -> Result<TcpStream> {
-    let timeout = Duration::from_secs(20);
-    match tokio::time::timeout(timeout, TcpStream::connect((host, port))).await {
-        Ok(Ok(s)) => {
-            let _ = s.set_nodelay(true);
-            Ok(s)
-        }
-        Ok(Err(e)) => Err(Error::Upstream {
+    use std::net::ToSocketAddrs;
+    let host_s = host.to_string();
+    let std_stream = tokio::task::spawn_blocking(move || -> std::io::Result<std::net::TcpStream> {
+        let addr = (&*host_s, port)
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut i| i.next())
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "no addresses to connect to")
+            })?;
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(20))
+    })
+    .await
+    .map_err(|e| Error::Upstream {
+        host: host.into(),
+        port,
+        message: format!("connect join: {e}"),
+    })?
+    .map_err(|e| Error::Upstream {
+        host: host.into(),
+        port,
+        message: format!("{e} [raw_os_error={:?}]", e.raw_os_error()),
+    })?;
+    std_stream
+        .set_nonblocking(true)
+        .map_err(|e| Error::Upstream {
             host: host.into(),
             port,
-            message: e.to_string(),
-        }),
-        Err(_) => Err(Error::Upstream {
-            host: host.into(),
-            port,
-            message: "connect timed out".into(),
-        }),
-    }
+            message: format!("set_nonblocking: {e}"),
+        })?;
+    let _ = std_stream.set_nodelay(true);
+    TcpStream::from_std(std_stream).map_err(|e| Error::Upstream {
+        host: host.into(),
+        port,
+        message: e.to_string(),
+    })
 }
