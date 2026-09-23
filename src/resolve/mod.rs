@@ -106,7 +106,7 @@ impl Resolver {
                 Mode::System => None,
                 Mode::Proxy => None,
             };
-            return winhttp::resolve(url, pac.as_deref(), self.cfg.mode);
+            winhttp::resolve(url, pac.as_deref(), self.cfg.mode)
         }
         #[cfg(not(windows))]
         {

@@ -6,6 +6,11 @@ use crate::http1::{self, ClientRequest};
 use crate::resolve::{self, Resolver};
 
 pub async fn run(cfg: &Config) -> Result<()> {
+    println!("ntgate      {}", env!("CARGO_PKG_VERSION"));
+    match std::env::current_exe() {
+        Ok(path) => println!("exe         {}", path.display()),
+        Err(e) => println!("exe         ({e})"),
+    }
     println!("listen      {}", cfg.listen);
     println!("mode        {:?}", cfg.mode);
     if let Some(pac) = cfg.pac.as_deref() {
@@ -36,7 +41,11 @@ pub async fn run(cfg: &Config) -> Result<()> {
                 return Ok(());
             }
             Err(e) => {
-                println!("fail        {} ({e})", hop.display());
+                println!(
+                    "fail        ntgate {} {} ({e})",
+                    env!("CARGO_PKG_VERSION"),
+                    hop.display()
+                );
                 last = Some(e);
             }
         }

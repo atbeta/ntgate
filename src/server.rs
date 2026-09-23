@@ -16,7 +16,11 @@ pub async fn run(cfg: Config) -> Result<()> {
         tracing::warn!("listen {addr} is not loopback; other hosts will share your SSO session");
     }
     let listener = TcpListener::bind(addr).await?;
-    tracing::info!("listening on {addr} (mode={:?})", cfg.mode);
+    tracing::info!(
+        "ntgate {} listening on {addr} (mode={:?})",
+        env!("CARGO_PKG_VERSION"),
+        cfg.mode
+    );
     let resolver = Arc::new(Resolver::new(cfg.clone()));
     loop {
         let (client, peer) = listener.accept().await?;
