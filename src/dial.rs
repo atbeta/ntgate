@@ -1,14 +1,14 @@
 //! Outbound TCP connect shared by the proxy and `doctor`.
 //!
-//! Tokio connects only after setting `FIONBIO`. Some corporate Winsock filters
-//! answer that with WSAEACCES (10013). On Windows the first attempt is the
-//! classic `socket()` + blocking `connect()` used by curl and cntlm (no
-//! `WSA_FLAG_NO_HANDLE_INHERIT`, no pre-bind). If that still returns 10013,
-//! retry with an explicit `bind` to port 0 (Hyper-V excluded ephemeral ports)
-//! and finally a non-overlapped `WSASocketW`.
+//! On Windows every 0.2.1 attempt set `SO_SNDTIMEO` before `connect`. A corporate
+//! Winsock filter can answer that with WSAEACCES (10013) for every socket
+//! type. The first attempt is now a bare blocking `socket()` + `connect()`
+//! with no socket options. Later attempts are `std::net`, a bind to a fixed
+//! local port, and a non-overlapped socket. The error names the syscall.
 
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
+#[cfg(not(windows))]
 use std::time::Duration;
 
 #[cfg(not(windows))]
@@ -17,10 +17,8 @@ use tokio::net::TcpStream;
 
 use crate::error::{Error, Result};
 
+#[cfg(not(windows))]
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
-/// Windows `WSAEACCES`. Non-blocking connect and excluded ephemeral ports.
-#[cfg(windows)]
-const WSAEACCES: i32 = 10013;
 
 pub(crate) async fn connect(host: &str, port: u16) -> Result<TcpStream> {
     let host_owned = host.to_string();
@@ -62,7 +60,7 @@ fn connect_blocking(host: String, port: u16) -> Result<std::net::TcpStream> {
     for addr in addrs {
         match connect_addr(addr) {
             Ok(stream) => return Ok(stream),
-            Err(e) => errors.push(format!("{addr}: {}", io_msg(&e))),
+            Err(e) => errors.push(format!("{addr}: {}", describe(&e))),
         }
     }
     Err(Error::Upstream {
@@ -110,26 +108,17 @@ fn connect_addr_unix(addr: SocketAddr) -> io::Result<std::net::TcpStream> {
 #[cfg(windows)]
 fn connect_addr_windows(addr: SocketAddr) -> io::Result<std::net::TcpStream> {
     let mut notes = Vec::new();
-    for n in 1..=4 {
-        match blocking::plain(addr) {
+    for attempt in [
+        blocking::bare,
+        blocking::std_connect,
+        blocking::pinned,
+        blocking::nooverlap,
+    ] {
+        match attempt(addr) {
             Ok(stream) => return Ok(stream),
-            Err(e) if is_wsaeacces(&e) && n < 4 => {}
-            Err(e) if is_wsaeacces(&e) => notes.push(format!("plain x4: {}", io_msg(&e))),
-            Err(e) => return Err(e),
+            Err(fail) if fail.is_acces() => notes.push(fail.to_string()),
+            Err(fail) => return Err(fail.into_io()),
         }
-    }
-    for n in 1..=8 {
-        match blocking::bind0(addr) {
-            Ok(stream) => return Ok(stream),
-            Err(e) if is_wsaeacces(&e) && n < 8 => {}
-            Err(e) if is_wsaeacces(&e) => notes.push(format!("bind0 x8: {}", io_msg(&e))),
-            Err(e) => return Err(e),
-        }
-    }
-    match blocking::nooverlap(addr) {
-        Ok(stream) => return Ok(stream),
-        Err(e) if is_wsaeacces(&e) => notes.push(format!("nooverlap: {}", io_msg(&e))),
-        Err(e) => return Err(e),
     }
     Err(io::Error::new(
         io::ErrorKind::PermissionDenied,
@@ -142,26 +131,48 @@ fn connect_addr_windows(addr: SocketAddr) -> io::Result<std::net::TcpStream> {
 }
 
 #[cfg(windows)]
-fn is_wsaeacces(err: &io::Error) -> bool {
-    err.raw_os_error() == Some(WSAEACCES)
-}
-
-#[cfg(windows)]
 mod blocking {
     use std::io;
     use std::mem::{MaybeUninit, size_of};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::windows::io::FromRawSocket;
-    use std::time::Duration;
 
     use windows_sys::Win32::Networking::WinSock::{
         AF_INET, AF_INET6, FIONBIO, IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0, INVALID_SOCKET,
-        IPPROTO_TCP, SO_SNDTIMEO, SOCK_STREAM, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0,
-        SOCKET, SOCKET_ERROR, SOL_SOCKET, WSADATA, WSAGetLastError, WSASocketW, WSAStartup, bind,
-        closesocket, connect, ioctlsocket, setsockopt, socket,
+        IPPROTO_TCP, SOCK_STREAM, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKET,
+        SOCKET_ERROR, WSADATA, WSAEACCES, WSAEADDRINUSE, WSAGetLastError, WSASocketW, WSAStartup,
+        bind, closesocket, connect, ioctlsocket, socket,
     };
 
-    use super::CONNECT_TIMEOUT;
+    use super::io_msg;
+
+    pub(super) struct Fail {
+        step: String,
+        err: io::Error,
+    }
+
+    impl Fail {
+        fn new(step: impl Into<String>, err: io::Error) -> Self {
+            Self {
+                step: step.into(),
+                err,
+            }
+        }
+
+        pub(super) fn is_acces(&self) -> bool {
+            self.err.raw_os_error() == Some(WSAEACCES)
+        }
+
+        pub(super) fn into_io(self) -> io::Error {
+            io::Error::other(self.to_string())
+        }
+    }
+
+    impl std::fmt::Display for Fail {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}: {}", self.step, io_msg(&self.err))
+        }
+    }
 
     struct Sock(SOCKET);
 
@@ -173,27 +184,70 @@ mod blocking {
         }
     }
 
-    pub(super) fn plain(addr: SocketAddr) -> io::Result<std::net::TcpStream> {
-        let sock = Sock::open(addr, true)?;
-        finish(sock, addr)
+    pub(super) fn bare(addr: SocketAddr) -> Result<std::net::TcpStream, Fail> {
+        let sock = Sock::open(addr, true).map_err(|e| Fail::new("bare/socket", e))?;
+        sock.connect_to(addr)
+            .map_err(|e| Fail::new("bare/connect", e))?;
+        sock.into_std().map_err(|e| Fail::new("bare/nonblock", e))
     }
 
-    pub(super) fn bind0(addr: SocketAddr) -> io::Result<std::net::TcpStream> {
-        let sock = Sock::open(addr, true)?;
-        sock.bind_any(addr)?;
-        finish(sock, addr)
+    pub(super) fn std_connect(addr: SocketAddr) -> Result<std::net::TcpStream, Fail> {
+        let stream = std::net::TcpStream::connect(addr).map_err(|e| Fail::new("std/connect", e))?;
+        stream
+            .set_nonblocking(true)
+            .map_err(|e| Fail::new("std/nonblock", e))?;
+        let _ = stream.set_nodelay(true);
+        Ok(stream)
     }
 
-    pub(super) fn nooverlap(addr: SocketAddr) -> io::Result<std::net::TcpStream> {
-        let sock = Sock::open(addr, false)?;
-        finish(sock, addr)
+    pub(super) fn pinned(addr: SocketAddr) -> Result<std::net::TcpStream, Fail> {
+        // Fixed ports avoid the ephemeral allocator, which returns 10013 when
+        // every port it hands out sits in a Hyper-V excluded range.
+        const PORTS: &[u16] = &[
+            49152, 50000, 52000, 54000, 56000, 58000, 60000, 62000, 20000, 25000, 30000, 35000,
+            40000, 45000,
+        ];
+        let mut acces = 0u32;
+        let mut in_use = 0u32;
+        let mut last = None;
+        for port in PORTS {
+            let sock = Sock::open(addr, true).map_err(|e| Fail::new("pin/socket", e))?;
+            match sock.bind_port(addr, *port) {
+                Ok(()) => {
+                    sock.connect_to(addr)
+                        .map_err(|e| Fail::new(format!("pin{port}/connect"), e))?;
+                    return sock
+                        .into_std()
+                        .map_err(|e| Fail::new(format!("pin{port}/nonblock"), e));
+                }
+                Err(e) if e.raw_os_error() == Some(WSAEACCES) => {
+                    acces += 1;
+                    last = Some(e);
+                }
+                Err(e) if e.raw_os_error() == Some(WSAEADDRINUSE) => in_use += 1,
+                Err(e) => return Err(Fail::new(format!("pin{port}/bind"), e)),
+            }
+        }
+        let _ = last;
+        if acces > 0 {
+            Err(Fail::new(
+                format!("pin bind WSAEACCES x{acces} in-use x{in_use}"),
+                io::Error::from_raw_os_error(WSAEACCES),
+            ))
+        } else {
+            Err(Fail::new(
+                format!("pin in-use x{in_use}"),
+                io::Error::new(io::ErrorKind::AddrInUse, "no free local port"),
+            ))
+        }
     }
 
-    fn finish(sock: Sock, addr: SocketAddr) -> io::Result<std::net::TcpStream> {
-        sock.set_send_timeout(Some(CONNECT_TIMEOUT))?;
-        sock.connect_to(addr)?;
-        sock.set_send_timeout(None)?;
+    pub(super) fn nooverlap(addr: SocketAddr) -> Result<std::net::TcpStream, Fail> {
+        let sock = Sock::open(addr, false).map_err(|e| Fail::new("nooverlap/socket", e))?;
+        sock.connect_to(addr)
+            .map_err(|e| Fail::new("nooverlap/connect", e))?;
         sock.into_std()
+            .map_err(|e| Fail::new("nooverlap/nonblock", e))
     }
 
     impl Sock {
@@ -213,32 +267,16 @@ mod blocking {
             Ok(Self(sock))
         }
 
-        fn bind_any(&self, remote: SocketAddr) -> io::Result<()> {
+        fn bind_port(&self, remote: SocketAddr, port: u16) -> io::Result<()> {
             let local = match remote {
-                SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-                SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+                SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
+                SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port),
             };
             with_sockaddr(local, |ptr, len| unsafe { bind(self.0, ptr, len) })
         }
 
         fn connect_to(&self, addr: SocketAddr) -> io::Result<()> {
             with_sockaddr(addr, |ptr, len| unsafe { connect(self.0, ptr, len) })
-        }
-
-        fn set_send_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-            // Windows SO_SNDTIMEO is milliseconds. 0 means wait forever, and it
-            // also bounds a blocking connect.
-            let ms = timeout.map_or(0, |d| d.as_millis().min(u32::MAX as u128) as u32);
-            let rc = unsafe {
-                setsockopt(
-                    self.0,
-                    SOL_SOCKET,
-                    SO_SNDTIMEO,
-                    (&ms as *const u32).cast(),
-                    size_of::<u32>() as i32,
-                )
-            };
-            win_rc(rc)
         }
 
         fn into_std(self) -> io::Result<std::net::TcpStream> {
@@ -328,6 +366,15 @@ mod blocking {
 
 fn io_msg(err: &io::Error) -> String {
     format!("{err} [raw_os_error={:?}]", err.raw_os_error())
+}
+
+fn describe(err: &io::Error) -> String {
+    let msg = err.to_string();
+    if err.raw_os_error().is_none() {
+        msg
+    } else {
+        io_msg(err)
+    }
 }
 
 #[cfg(test)]

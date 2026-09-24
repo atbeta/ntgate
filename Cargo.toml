@@ -1,6 +1,6 @@
 [package]
 name = "ntgate"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Windows NTLM/Negotiate local proxy facade (Winfoom-compatible, current-user SSO)"
 license = "MIT OR Apache-2.0"

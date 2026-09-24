@@ -32,6 +32,7 @@ pub async fn run(cfg: &Config) -> Result<()> {
             .collect::<Vec<_>>()
             .join(" -> ")
     );
+    println!("selftest    {}", loopback_selftest().await);
 
     let mut last = None;
     for hop in &hops {
@@ -51,6 +52,21 @@ pub async fn run(cfg: &Config) -> Result<()> {
         }
     }
     Err(last.unwrap_or_else(|| Error::msg("no hop succeeded")))
+}
+
+async fn loopback_selftest() -> String {
+    let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(e) => return format!("listen fail {e}"),
+    };
+    let port = match listener.local_addr() {
+        Ok(addr) => addr.port(),
+        Err(e) => return format!("listen fail {e}"),
+    };
+    match crate::dial::connect("127.0.0.1", port).await {
+        Ok(_) => format!("ok 127.0.0.1:{port}"),
+        Err(e) => format!("fail {e}"),
+    }
 }
 
 fn dest_from_test_url(url: &str) -> Result<(String, u16)> {
