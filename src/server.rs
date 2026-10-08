@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
 
+#[cfg(not(windows))]
 use crate::auth;
 use crate::config::Config;
 use crate::error::{Error, Result};
@@ -92,6 +93,7 @@ async fn handle_client(cfg: &Config, resolver: Arc<Resolver>, mut client: TcpStr
     io::send_simple(&mut client, 502, &msg).await
 }
 
+#[cfg_attr(windows, allow(unused_variables))]
 async fn try_hop(
     cfg: &Config,
     hop: &Hop,
@@ -116,30 +118,46 @@ async fn try_hop(
             }
         }
         Hop::Http { host, port } => {
-            let mut upstream = crate::dial::connect(host, *port).await?;
-            let mut up_left = Vec::new();
-            let resp =
-                auth::authenticate_and_send(&mut upstream, &mut up_left, req, host, cfg.auth)
-                    .await?;
-            if req.is_connect() {
-                if resp.status != 200 {
-                    io::discard_body(&mut upstream, &mut up_left, &resp.headers).await?;
-                    return Err(Error::Upstream {
-                        host: host.clone(),
-                        port: *port,
-                        message: format!("CONNECT failed: {} {}", resp.status, resp.reason),
-                    });
+            #[cfg(windows)]
+            {
+                return crate::winhttp_up::forward(
+                    client,
+                    leftover,
+                    host,
+                    *port,
+                    dest_host,
+                    dest_port,
+                    req.is_connect(),
+                )
+                .await;
+            }
+            #[cfg(not(windows))]
+            {
+                let mut upstream = crate::dial::connect(host, *port).await?;
+                let mut up_left = Vec::new();
+                let resp =
+                    auth::authenticate_and_send(&mut upstream, &mut up_left, req, host, cfg.auth)
+                        .await?;
+                if req.is_connect() {
+                    if resp.status != 200 {
+                        io::discard_body(&mut upstream, &mut up_left, &resp.headers).await?;
+                        return Err(Error::Upstream {
+                            host: host.clone(),
+                            port: *port,
+                            message: format!("CONNECT failed: {} {}", resp.status, resp.reason),
+                        });
+                    }
+                    io::write_all(client, b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
+                    flush_preface(&mut upstream, leftover).await?;
+                    if !up_left.is_empty() {
+                        io::write_all(client, &up_left).await?;
+                        up_left.clear();
+                    }
+                    io::splice(client, &mut upstream).await
+                } else {
+                    io::write_all(client, &http1::encode_response_to_client(&resp)).await?;
+                    io::forward_body(&mut upstream, &mut up_left, client, &resp.headers).await
                 }
-                io::write_all(client, b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
-                flush_preface(&mut upstream, leftover).await?;
-                if !up_left.is_empty() {
-                    io::write_all(client, &up_left).await?;
-                    up_left.clear();
-                }
-                io::splice(client, &mut upstream).await
-            } else {
-                io::write_all(client, &http1::encode_response_to_client(&resp)).await?;
-                io::forward_body(&mut upstream, &mut up_left, client, &resp.headers).await
             }
         }
     }

@@ -16,6 +16,8 @@ pub mod noproxy;
 pub mod resolve;
 pub mod server;
 pub mod service;
+#[cfg(windows)]
+mod winhttp_up;
 
 pub use config::{Config, Mode};
 pub use error::Error;

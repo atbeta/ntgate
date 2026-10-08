@@ -1,7 +1,9 @@
+#[cfg(not(windows))]
 use crate::auth;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::hop::Hop;
+#[cfg(not(windows))]
 use crate::http1::{self, ClientRequest};
 use crate::resolve::{self, Resolver};
 
@@ -92,6 +94,7 @@ fn dest_from_test_url(url: &str) -> Result<(String, u16)> {
     }
 }
 
+#[cfg_attr(windows, allow(unused_variables))]
 async fn probe(cfg: &Config, hop: &Hop, dest: &(String, u16)) -> Result<String> {
     match hop {
         Hop::Direct => {
@@ -99,46 +102,54 @@ async fn probe(cfg: &Config, hop: &Hop, dest: &(String, u16)) -> Result<String> 
             Ok(format!("direct TCP {}:{}", dest.0, dest.1))
         }
         Hop::Http { host, port } => {
-            let mut up = crate::dial::connect(host, *port).await?;
-            let mut leftover = Vec::new();
-            let req = if dest.1 == 443 {
-                ClientRequest {
-                    method: "CONNECT".into(),
-                    target: format!("{}:{}", dest.0, dest.1),
-                    version: "HTTP/1.1".into(),
-                    headers: vec![("Host".into(), format!("{}:{}", dest.0, dest.1))],
-                    body: Vec::new(),
+            #[cfg(windows)]
+            {
+                return crate::winhttp_up::probe(host, *port, &dest.0, dest.1).await;
+            }
+            #[cfg(not(windows))]
+            {
+                let mut up = crate::dial::connect(host, *port).await?;
+                let mut leftover = Vec::new();
+                let req = if dest.1 == 443 {
+                    ClientRequest {
+                        method: "CONNECT".into(),
+                        target: format!("{}:{}", dest.0, dest.1),
+                        version: "HTTP/1.1".into(),
+                        headers: vec![("Host".into(), format!("{}:{}", dest.0, dest.1))],
+                        body: Vec::new(),
+                    }
+                } else {
+                    ClientRequest {
+                        method: "GET".into(),
+                        target: cfg.test_url.clone(),
+                        version: "HTTP/1.1".into(),
+                        headers: vec![
+                            ("Host".into(), dest.0.clone()),
+                            ("User-Agent".into(), "ntgate/0.1".into()),
+                        ],
+                        body: Vec::new(),
+                    }
+                };
+                let resp =
+                    auth::authenticate_and_send(&mut up, &mut leftover, &req, host, cfg.auth)
+                        .await?;
+                if resp.status >= 200 && resp.status < 400 {
+                    Ok(format!(
+                        "{}:{} -> HTTP {} {}",
+                        host, port, resp.status, resp.reason
+                    ))
+                } else if resp.status == 407 {
+                    Err(Error::Auth(format!(
+                        "still 407 after handshake ({})",
+                        http1::proxy_authenticate(&resp.headers).join(", ")
+                    )))
+                } else {
+                    Err(Error::Upstream {
+                        host: host.clone(),
+                        port: *port,
+                        message: format!("{} {}", resp.status, resp.reason),
+                    })
                 }
-            } else {
-                ClientRequest {
-                    method: "GET".into(),
-                    target: cfg.test_url.clone(),
-                    version: "HTTP/1.1".into(),
-                    headers: vec![
-                        ("Host".into(), dest.0.clone()),
-                        ("User-Agent".into(), "ntgate/0.1".into()),
-                    ],
-                    body: Vec::new(),
-                }
-            };
-            let resp =
-                auth::authenticate_and_send(&mut up, &mut leftover, &req, host, cfg.auth).await?;
-            if resp.status >= 200 && resp.status < 400 {
-                Ok(format!(
-                    "{}:{} -> HTTP {} {}",
-                    host, port, resp.status, resp.reason
-                ))
-            } else if resp.status == 407 {
-                Err(Error::Auth(format!(
-                    "still 407 after handshake ({})",
-                    http1::proxy_authenticate(&resp.headers).join(", ")
-                )))
-            } else {
-                Err(Error::Upstream {
-                    host: host.clone(),
-                    port: *port,
-                    message: format!("{} {}", resp.status, resp.reason),
-                })
             }
         }
     }
