@@ -1,6 +1,6 @@
 [package]
 name = "ntgate"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 description = "Windows NTLM/Negotiate local proxy facade (Winfoom-compatible, current-user SSO)"
 license = "MIT OR Apache-2.0"
@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",
     "Win32_Security",

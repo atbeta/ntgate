@@ -75,7 +75,9 @@ mod windows {
         let tmp = std::env::temp_dir().join("ntgate-task.xml");
         {
             let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(xml.as_bytes())?;
+            // schtasks on Chinese Windows rejects UTF-8 with
+            // "(1,40) 无法切换编码". It accepts UTF-16 LE with a BOM.
+            f.write_all(&encode_utf16_le_bom(&xml))?;
         }
         let out = Command::new("schtasks")
             .args(["/Create", "/TN", TASK_NAME, "/XML"])
@@ -86,7 +88,7 @@ mod windows {
         if !out.status.success() {
             return Err(Error::msg(format!(
                 "schtasks failed: {}",
-                String::from_utf8_lossy(&out.stderr)
+                console_text(&out.stderr)
             )));
         }
         let _ = Command::new("schtasks")
@@ -105,8 +107,9 @@ mod windows {
             .args(["/Delete", "/TN", TASK_NAME, "/F"])
             .output()?;
         if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            if !err.to_ascii_lowercase().contains("cannot find") {
+            let err = console_text(&out.stderr);
+            let folded = err.to_ascii_lowercase();
+            if !folded.contains("cannot find") && !err.contains("找不到") {
                 return Err(Error::msg(format!("schtasks delete failed: {err}")));
             }
         }
@@ -126,6 +129,49 @@ mod windows {
         }
     }
 
+    fn encode_utf16_le_bom(s: &str) -> Vec<u8> {
+        let mut out = vec![0xFF, 0xFE];
+        for unit in s.encode_utf16() {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
+    fn console_text(bytes: &[u8]) -> String {
+        if bytes.is_empty() {
+            return String::new();
+        }
+        use windows_sys::Win32::Globalization::MultiByteToWideChar;
+        let needed = unsafe {
+            MultiByteToWideChar(
+                0,
+                0,
+                bytes.as_ptr(),
+                bytes.len() as i32,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if needed <= 0 {
+            return String::from_utf8_lossy(bytes).into_owned();
+        }
+        let mut wide = vec![0u16; needed as usize];
+        let wrote = unsafe {
+            MultiByteToWideChar(
+                0,
+                0,
+                bytes.as_ptr(),
+                bytes.len() as i32,
+                wide.as_mut_ptr(),
+                needed,
+            )
+        };
+        if wrote <= 0 {
+            return String::from_utf8_lossy(bytes).into_owned();
+        }
+        String::from_utf16_lossy(&wide[..wrote as usize])
+    }
+
     fn xml_escape(s: &str) -> String {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -137,7 +183,7 @@ mod windows {
         let exe = xml_escape(exe);
         let args = xml_escape(&format!("run -c \"{config}\""));
         format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
+            r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>ntgate local NTLM/Negotiate proxy facade</Description>
